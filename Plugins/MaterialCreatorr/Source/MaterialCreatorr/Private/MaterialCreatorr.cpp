@@ -4,11 +4,13 @@
 #include "AssetToolsModule.h"
 #include "AutomatedAssetImportData.h"
 #include "Editor/EditorEngine.h"
+#include "Engine/StaticMeshActor.h"
 #include "HAL/FileManagerGeneric.h"
 #include "ImageUtils.h"
 #include "Misc/Paths.h"
 #include "Factories/MaterialFactoryNew.h"
 #include "Factories/TextureFactory.h"
+#include "Factories/WorldFactory.h"
 
 #define LOCTEXT_NAMESPACE "FMaterialCreatorrModule"
 
@@ -61,16 +63,24 @@ void FMaterialCreatorrModule::CreateMaterial(const FString& Path)
 
 	for (UObject* Obj : Textures)
 	{
-		UMaterialFactoryNew* NewMaterial = NewObject<UMaterialFactoryNew>();
+		UMaterialFactoryNew* NewMaterialFactory = NewObject<UMaterialFactoryNew>();
 		FString AssetName = Obj->GetName();
 		
-		UPackage* Package = CreatePackage(*FString::Printf(TEXT("/Game/Material/%s"), *AssetName));
-		NewMaterial->FactoryCreateNew(NewMaterial->SupportedClass, Package, *AssetName, EObjectFlags::RF_Standalone | EObjectFlags::RF_Public, nullptr, GWarn);
-		FAssetRegistryModule::AssetCreated(NewMaterial);
-		UMaterial* Material = Cast<UMaterial>(NewMaterial);
+		UPackage* Package = CreatePackage(*FString::Printf(TEXT("/Game/Assets/Material/%s"), *AssetName));
+		UObject* MaterialObj = NewMaterialFactory->FactoryCreateNew(NewMaterialFactory->SupportedClass, Package, *AssetName, EObjectFlags::RF_Standalone | EObjectFlags::RF_Public, nullptr, GWarn);
+		FAssetRegistryModule::AssetCreated(MaterialObj);
+		UMaterial* Material = Cast<UMaterial>(MaterialObj);
+		
+
+		Material->Modify();
+		UMaterialExpressionTextureSample* TextureSample = NewObject<UMaterialExpressionTextureSample>(Material);
+		TextureSample->Texture = Cast<UTexture>(Obj);
+		Material->Expressions.Add(TextureSample);
+		Material->BaseColor.Expression = TextureSample;
+		Material->PostEditChange();
+		
 		FString FileName = FPackageName::LongPackageNameToFilename(Package->GetPathName(), FPackageName::GetAssetPackageExtension());
 		UPackage::SavePackage(Package, Obj, RF_Public | RF_Standalone, *FileName);
-
 		//notify modify on uobj
 		//modify uobject
 		//notify end of modify
@@ -114,9 +124,48 @@ TArray<UObject*> FMaterialCreatorrModule::ImportAsset(const TArray<FString>& Fil
 
 bool FMaterialCreatorrModule::Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar)
 {
-	if (FParse::Command(&Cmd,TEXT("Import")))
+	if (FParse::Command(&Cmd,TEXT("NewLevel")))
 	{
-		CreateMaterial(FString("C:\\Users\\lelem\\OneDrive\\Immagini\\CartellaImport"));
+		FString StaticMeshPath = FParse::Token(Cmd, true); //tokenizza gli argomenti
+
+		//UStaticMesh* StaticMesh = LoadObject<UStaticMesh>(nullptr, *StaticMeshPath);//se non riesce me la da null
+		UBlueprint* BluePrint = LoadObject<UBlueprint>(nullptr, *StaticMeshPath);
+		if (BluePrint && BluePrint->GeneratedClass->IsChildOf<AActor>())
+		{
+
+			UWorldFactory* NewLevel = NewObject<UWorldFactory>();
+			uint64 SuffixName = FPlatformTime::Cycles64();
+			FString AssetName = FString::Printf(TEXT("M_New_Level_%llu"), SuffixName);
+
+			UPackage* Package = CreatePackage(*FString::Printf(TEXT("/Game/Assets/Material/%s"), *AssetName));
+			UObject* NewLevelObj = NewLevel->FactoryCreateNew(NewLevel->SupportedClass, Package, *AssetName, EObjectFlags::RF_Standalone | EObjectFlags::RF_Public, nullptr, GWarn);
+			FAssetRegistryModule::AssetCreated(NewLevelObj);
+			UWorld* WorldCasted = Cast<UWorld>(NewLevelObj);
+
+			WorldCasted->Modify();
+			FTransform MyTransform;
+			FVector VectorToAdd;
+			for (int32 Index = 0; Index < 5; Index++)
+			{
+				VectorToAdd.Z += Index * 10;
+				MyTransform.AddToTranslation(VectorToAdd);
+				//AStaticMeshActor* MyActor = WorldCasted->SpawnActor<AStaticMeshActor>();
+				AActor* MyActor = WorldCasted->SpawnActor<AActor>(BluePrint->GeneratedClass);
+				if (MyActor->GetRootComponent())
+				{
+					MyActor->SetActorTransform(MyTransform);
+				}
+				//MyActor->SetActorTransform(MyTransform);
+				//MyActor->GetStaticMeshComponent()->SetStaticMesh(StaticMesh);
+
+			}
+			WorldCasted->SpawnActor<AStaticMeshActor>();
+			WorldCasted->SpawnActor<AStaticMeshActor>();
+			WorldCasted->SpawnActor<AStaticMeshActor>();
+
+			WorldCasted->PostEditChange();
+			WorldCasted->MarkPackageDirty();
+		}
 		return true;
 	}
 	return false;
